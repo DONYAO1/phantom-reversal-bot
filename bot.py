@@ -1,8 +1,8 @@
 import os
 import base64
-import json
 import httpx
-from telegram import Update
+import asyncio
+from telegram import Update, Bot
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
@@ -33,7 +33,7 @@ Ta stratégie s'appelle Phantom Reversal Pro. Elle est basée UNIQUEMENT sur le 
 
 ## TON FORMAT DE RÉPONSE
 
-Réponds UNIQUEMENT dans ce format exact, rien d'autre :
+Réponds UNIQUEMENT dans ce format exact :
 
 🎯 SIGNAL : [CALL 📈 / PUT 📉 / NO TRADE ⛔]
 ⭐ Confiance : [1-5]/5
@@ -46,7 +46,7 @@ Réponds UNIQUEMENT dans ce format exact, rien d'autre :
 [3-4 phrases d'analyse précise]
 
 ⚠️ Avertissement :
-[Risques ou points d'attention, ou "Aucun" si signal propre]
+[Risques ou points d'attention, ou Aucun si signal propre]
 
 ---
 Phantom Reversal Pro · Price Action pur · OTC 5min"""
@@ -71,7 +71,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "2️⃣ Passe en timeframe *5 min*\n"
         "3️⃣ Prends un screenshot du graphique\n"
         "4️⃣ Envoie-le ici\n"
-        "5️⃣ Attends mon analyse (10-15 secondes)\n\n"
+        "5️⃣ Attends mon analyse\n\n"
         "*Signals possibles :*\n"
         "📈 CALL → Tu cliques ACHAT\n"
         "📉 PUT → Tu cliques VENTE\n"
@@ -82,18 +82,16 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def analyze_chart(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("🔍 Analyse en cours... Patiente 10-15 secondes.")
+    await update.message.reply_text("🔍 Analyse en cours... Patiente 15 secondes.")
 
     try:
-        # Télécharger la photo
         photo = update.message.photo[-1]
         file = await context.bot.get_file(photo.file_id)
-        
+
         async with httpx.AsyncClient() as client:
             photo_response = await client.get(file.file_path)
             image_data = base64.b64encode(photo_response.content).decode("utf-8")
 
-        # Appel API Anthropic
         async with httpx.AsyncClient(timeout=60.0) as client:
             response = await client.post(
                 "https://api.anthropic.com/v1/messages",
@@ -138,8 +136,7 @@ async def analyze_chart(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     except Exception as e:
         await update.message.reply_text(
-            "❌ Erreur lors de l'analyse. Réessaie dans quelques secondes.\n"
-            f"Détail : {str(e)}"
+            f"❌ Erreur lors de l'analyse. Réessaie.\nDétail : {str(e)}"
         )
 
 
@@ -152,15 +149,22 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 def main():
-    app = Application.builder().token(TELEGRAM_TOKEN).build()
-    
+    app = Application.builder().token(TELEGRAM_TOKEN).updater(None).build()
+
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("help", help_command))
     app.add_handler(MessageHandler(filters.PHOTO, analyze_chart))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
+
+    print("Phantom Reversal Pro Bot demarre...")
     
-    print("🚀 Phantom Reversal Pro Bot démarré...")
-    app.run_polling(allowed_updates=Update.ALL_TYPES)
+    async def run():
+        await app.initialize()
+        await app.start()
+        await app.updater.start_polling(allowed_updates=Update.ALL_TYPES)
+        await asyncio.Event().wait()
+
+    asyncio.run(run())
 
 
 if __name__ == "__main__":
